@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es-CO">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>24h Stories</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #000; color: white; }
+        .stories-header { padding: 12px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 10px; overflow-x: auto; }
+        .story-item { text-align: center; cursor: pointer; }
+        .story-avatar { width: 60px; height: 60px; border-radius: 50%; border: 3px solid transparent; background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); padding: 3px; }
+        .story-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 2px solid #000; }
+        .story-avatar.plus { background: #333; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .story-username { font-size: 12px; margin-top: 5px; }
+        .story-viewer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1000; display: none; }
+        .story-progress { display: flex; gap: 3px; padding: 10px; }
+        .progress-bar { height: 3px; background: rgba(255,255,255,0.3); flex: 1; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: white; width: 0%; transition: width 3s linear; }
+        .story-image { width: 100%; height: calc(100% - 50px); display: flex; align-items: center; justify-content: center; }
+        .story-image img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .close-btn { position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.5); border: none; color: white; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; }
+        input[type="file"] { display: none; }
+        .empty-state { text-align: center; padding: 50px 20px; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="stories-header" id="storiesList">
+        <div class="story-item" id="addStoryBtn">
+            <div class="story-avatar plus">+</div>
+            <div class="story-username">Agregar</div>
+        </div>
+        <!-- Stories aparecerán aquí -->
+    </div>
+
+    <div id="storyViewer" class="story-viewer">
+        <div class="story-progress" id="progressBars"></div>
+        <div class="story-image" id="storyImage"></div>
+        <button class="close-btn" id="closeBtn">×</button>
+    </div>
+
+    <div id="emptyState" class="empty-state">
+        <h2>No hay historias aún</h2>
+        <p>Haz clic en el botón "+" para agregar su primera historia</p>
+    </div>
+
+    <script>
+        let stories = JSON.parse(localStorage.getItem('stories')) || [];
+        let currentStoryIndex = 0;
+        let progressInterval;
+        let autoNextTimeout;
+
+        const storiesList = document.getElementById('storiesList');
+        const addStoryBtn = document.getElementById('addStoryBtn');
+        const storyViewer = document.getElementById('storyViewer');
+        const progressBars = document.getElementById('progressBars');
+        const storyImage = document.getElementById('storyImage');
+        const closeBtn = document.getElementById('closeBtn');
+        const emptyState = document.getElementById('emptyState');
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+
+        // Renderizar lista de stories
+        function renderStories() {
+            const existing = document.querySelectorAll('.story-item:not(#addStoryBtn)');
+            existing.forEach(el => el.remove());
+            
+            stories.forEach((story, index) => {
+                const now = Date.now();
+                const storyTime = new Date(story.timestamp).getTime();
+                
+                // Eliminar si tiene más de 24 horas
+                if (now - storyTime > 24 * 60 * 60 * 1000) {
+                    stories.splice(index, 1);
+                    localStorage.setItem('stories', JSON.stringify(stories));
+                    return;
+                }
+                
+                const div = document.createElement('div');
+                div.className = 'story-item';
+                div.onclick = () => openStoryViewer(index);
+                
+                div.innerHTML = `
+                    <div class="story-avatar">
+                        <img src="${story.image}" alt="Story">
+                    </div>
+                    <div class="story-username">${story.username}</div>
+                `;
+                
+                storiesList.appendChild(div);
+            });
+            
+            emptyState.style.display = stories.length === 0 ? 'block' : 'none';
+        }
+
+        // Agregar nueva story
+        addStoryBtn.onclick = () => fileInput.click();
+        
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Redimensionar si es muy grande (max 1080x1920)
+                    let width = img.width;
+                    let height = img.height;
+                    const maxWidth = 1080;
+                    const maxHeight = 1920;
+                    
+                    if (width > maxWidth || height > maxHeight) {
+                        const ratio = Math.min(maxWidth/width, maxHeight/height);
+                        width *= ratio;
+                        height *= ratio;
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    const base64 = canvas.toDataURL('image/jpeg', 0.8);
+                    
+                    const newStory = {
+                        id: Date.now(),
+                        image: base64,
+                        username: 'Usuario',
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    stories.unshift(newStory);
+                    localStorage.setItem('stories', JSON.stringify(stories));
+                    renderStories();
+                    openStoryViewer(0);
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+
+        // Abrir visor de stories
+        function openStoryViewer(index) {
+            if (stories.length === 0) return;
+            
+            currentStoryIndex = index;
+            storyViewer.style.display = 'block';
+            showCurrentStory();
+        }
+
+        // Mostrar story actual
+        function showCurrentStory() {
+            progressBars.innerHTML = '';
+            storyImage.innerHTML = '';
+            
+            // Crear barras de progreso
+            stories.forEach((_, i) => {
+                const bar = document.createElement('div');
+                bar.className = 'progress-bar';
+                const fill = document.createElement('div');
+                fill.className = 'progress-fill';
+                bar.appendChild(fill);
+                progressBars.appendChild(bar);
+                
+                if (i === currentStoryIndex) {
+                    fill.style.width = '100%';
+                    fill.style.transition = 'width 3s linear';
+                } else if (i < currentStoryIndex) {
+                    fill.style.width = '100%';
+                }
+            });
+            
+            // Mostrar imagen
+            const story = stories[currentStoryIndex];
+            const img = document.createElement('img');
+            img.src = story.image;
+            storyImage.appendChild(img);
+            
+            // Configurar temporizador para siguiente story
+            clearTimeout(autoNextTimeout);
+            clearInterval(progressInterval);
+            
+            autoNextTimeout = setTimeout(() => {
+                nextStory();
+            }, 3000);
+        }
+
+        // Siguiente story
+        function nextStory() {
+            if (currentStoryIndex < stories.length - 1) {
+                currentStoryIndex++;
+                showCurrentStory();
+            } else {
+                closeStoryViewer();
+            }
+        }
+
+        // Cerrar visor
+        function closeStoryViewer() {
+            storyViewer.style.display = 'none';
+            clearTimeout(autoNextTimeout);
+            clearInterval(progressInterval);
+        }
+
+        closeBtn.onclick = closeStoryViewer;
+
+        // Swipe para móviles
+        let startX = 0;
+        storyImage.ontouchstart = (e) => {
+            startX = e.touches[0].clientX;
+        };
+        
+        storyImage.ontouchend = (e) => {
+            const endX = e.changedTouches[0].clientX;
+            const diff = startX - endX;
+            
+            if (Math.abs(diff) > 50) {
+                if (diff > 0) {
+                    nextStory(); // Swipe izquierda
+                } else {
+                    if (currentStoryIndex > 0) {
+                        currentStoryIndex--;
+                        showCurrentStory(); // Swipe derecha
+                    }
+                }
+            }
+        };
+
+        // Inicializar
+        renderStories();
+        
+        // Eliminar historias viejas cada minuto
+        setInterval(() => {
+            const now = Date.now();
+            stories = stories.filter(story => 
+                now - new Date(story.timestamp).getTime() <= 24 * 60 * 60 * 1000
+            );
+            localStorage.setItem('stories', JSON.stringify(stories));
+            renderStories();
+        }, 60000);
+    </script>
+</body>
+</html>
